@@ -2,6 +2,7 @@ package pgtestdb
 
 import (
 	"database/sql"
+	"fmt"
 	"io"
 	"net/url"
 )
@@ -23,6 +24,9 @@ func New(adminURI string) (*Manager, error) {
 	ret.adminURI, err = url.Parse(adminURI)
 	if err != nil {
 		return nil, err
+	}
+	if ret.adminURI.Scheme != "postgres" {
+		return nil, fmt.Errorf("uri scheme must postgres")
 	}
 
 	db, err := sql.Open("postgres", adminURI)
