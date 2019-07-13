@@ -15,7 +15,7 @@ type Manager struct {
 
 var _ io.Closer = (*Manager)(nil)
 
-// New .
+// New return new Manager
 func New(adminURI string) (*Manager, error) {
 	var err error
 
@@ -38,12 +38,12 @@ func New(adminURI string) (*Manager, error) {
 	return ret, nil
 }
 
-// Close .
+// Close the manager
 func (m *Manager) Close() error {
 	return m.db.Close()
 }
 
-// Create .
+// Create will create new database, and return the url to connect to that database
 func (m *Manager) Create() (*url.URL, error) {
 	user := "u" + randomHex()
 	pass := "p" + randomHex()
@@ -64,7 +64,7 @@ func (m *Manager) Create() (*url.URL, error) {
 	return retURL, nil
 }
 
-// Destroy .
+// Destroy the database that pointed by the url
 func (m *Manager) Destroy(uri *url.URL) error {
 	user := uri.User.Username()
 	dbname := uri.Path
