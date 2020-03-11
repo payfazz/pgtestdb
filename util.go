@@ -7,7 +7,7 @@ import (
 )
 
 func randomHex() string {
-	data := [8]byte{}
+	data := [16]byte{}
 	for {
 		_, err := rand.Read(data[:])
 		if err == nil {

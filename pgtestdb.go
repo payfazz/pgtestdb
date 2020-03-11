@@ -2,76 +2,112 @@ package pgtestdb
 
 import (
 	"database/sql"
-	"fmt"
 	"io"
 	"net/url"
+	"strings"
+	"sync"
 )
 
 // Manager .
 type Manager struct {
-	adminURI *url.URL
+	adminURL *url.URL
 	db       *sql.DB
+	created  struct {
+		mu   sync.Mutex
+		data map[string]struct{}
+	}
 }
 
 var _ io.Closer = (*Manager)(nil)
 
 // New return new Manager
-func New(adminURI string) (*Manager, error) {
+func New(adminConn string) (*Manager, error) {
 	var err error
 
-	ret := &Manager{}
+	m := &Manager{}
 
-	ret.adminURI, err = url.Parse(adminURI)
+	m.adminURL, err = url.Parse(adminConn)
 	if err != nil {
 		return nil, err
 	}
-	if ret.adminURI.Scheme != "postgres" {
-		return nil, fmt.Errorf("uri scheme must postgres")
-	}
 
-	db, err := sql.Open("postgres", adminURI)
+	m.db, err = sql.Open("postgres", adminConn)
 	if err != nil {
 		return nil, err
 	}
-	ret.db = db
 
-	return ret, nil
+	m.created.data = make(map[string]struct{})
+
+	return m, nil
 }
 
 // Close the manager
 func (m *Manager) Close() error {
+	var list []string
+
+	func() {
+		m.created.mu.Lock()
+		defer m.created.mu.Unlock()
+
+		for conn := range m.created.data {
+			list = append(list, conn)
+		}
+	}()
+
+	for _, conn := range list {
+		m.Destroy(conn)
+	}
+
 	return m.db.Close()
 }
 
 // Create will create new database, and return the url to connect to that database
-func (m *Manager) Create() (*url.URL, error) {
+func (m *Manager) Create() (string, error) {
+	m.created.mu.Lock()
+	defer m.created.mu.Unlock()
+
 	user := "u" + randomHex()
 	pass := "p" + randomHex()
 	dbname := "d" + randomHex()
+
 	if err := m.createUser(user, pass); err != nil {
-		return nil, err
-	}
-	if err := m.createDB(user, dbname); err != nil {
-		m.dropUser(user)
-		return nil, err
+		return "", err
 	}
 
-	retURL := new(url.URL)
-	*retURL = *m.adminURI
-	retURL.User = url.UserPassword(user, pass)
-	retURL.Path = "/" + dbname
-	retURL.RawPath = ""
-	return retURL, nil
+	if err := m.createDB(user, dbname); err != nil {
+		m.dropUser(user)
+		return "", err
+	}
+
+	connURL := &url.URL{}
+	*connURL = *m.adminURL
+	connURL.User = url.UserPassword(user, pass)
+	connURL.Path = "/" + dbname
+	connURL.RawPath = ""
+
+	conn := connURL.String()
+
+	m.created.data[conn] = struct{}{}
+
+	return conn, nil
 }
 
 // Destroy the database that pointed by the url
-func (m *Manager) Destroy(uri *url.URL) error {
-	user := uri.User.Username()
-	dbname := uri.Path
-	if len(dbname) > 0 {
-		dbname = dbname[1:]
+func (m *Manager) Destroy(conn string) {
+	m.created.mu.Lock()
+	defer m.created.mu.Unlock()
+
+	uri, err := url.Parse(conn)
+	if err != nil {
+		return
 	}
+
+	user := uri.User.Username()
+	dbname := uri.EscapedPath()
+	dbname = strings.TrimPrefix(dbname, "/")
+
 	m.dropDB(dbname)
 	m.dropUser(user)
-	return nil
+
+	delete(m.created.data, conn)
 }
